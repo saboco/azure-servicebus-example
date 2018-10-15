@@ -24,17 +24,18 @@ let sendMessage (connectionString :string) queueName sessionId messageId label (
             do! queueClient.CloseAsync() |> Async.AwaitTask
     }
 
-let printMessage queueName sessionId messageId message =
+let printMessage name queueName sessionId messageId message =
     task {
         printfn 
             """
-                #################################################
+                ####################### %s ######################
                 Queue: %s. 
                 SessionId: %s
                 MessageId: %s
                 Message: %s
                 #################################################
             """
+            name
             queueName
             sessionId
             messageId
@@ -43,7 +44,7 @@ let printMessage queueName sessionId messageId message =
 
         return random.Next(0,100) > 5 }
     
-let receiveMessage (connectionString : string) =
+let receiveMessage name (connectionString : string) =
 
     let exceptionReceivedHandler (args : ExceptionReceivedEventArgs) =
         let context = args.ExceptionReceivedContext
@@ -60,10 +61,15 @@ let receiveMessage (connectionString : string) =
     
     let processMessage (queueClient : IQueueClient) (session : IMessageSession) (message : Message) (_ : CancellationToken) =
         task {
-            let! r = printMessage queueClient.QueueName session.SessionId message.MessageId (Encoding.UTF8.GetString message.Body)
+            let! r = printMessage name queueClient.QueueName session.SessionId message.MessageId (Encoding.UTF8.GetString message.Body)
             match r with
-            | true -> return! queueClient.CompleteAsync(message.SystemProperties.LockToken)
-            | false -> return! queueClient.AbandonAsync(message.SystemProperties.LockToken)
+            | true ->
+                return! session.CompleteAsync(message.SystemProperties.LockToken)
+                if message.MessageId.Contains("Msg3") 
+                then return! session.CloseAsync()
+            | false -> return! session.AbandonAsync(message.SystemProperties.LockToken)
+            
+            do! Task.Delay(5000)
         } :> Task
 
     let f queueName =
@@ -101,6 +107,7 @@ let sendQueenMessages connectionString queueName =
 
 let sendKingdomMessages connectionString queueName=
     async {
+        do! Task.Delay(2000) |> Async.AwaitTask
         do! sendQueenMessages connectionString queueName
         do! sendKingMessages connectionString queueName
     }
@@ -109,9 +116,12 @@ let sendKingdomMessages connectionString queueName=
 [<EntryPoint>]
 let main _ =
     printfn "Hello Microsoft Azure Service bus from F#!"
-    let connectionString = "Endpoint=sb://<name space>.servicebus.windows.net/;SharedAccessKeyName=<key name>;SharedAccessKey=<access key>"
+    let connectionString = "Endpoint=sb://<name space>.servicebus.windows.net/;SharedAccessKeyName=<shared access key name>;SharedAccessKey=<shared access key>"
     let queueName = "kingdom_messenger"
-    receiveMessage connectionString queueName
+    
+    receiveMessage "receiver 1" connectionString queueName
+    receiveMessage "receiver 2" connectionString queueName
+    
     sendKingdomMessages connectionString queueName
     |> Async.RunSynchronously
 
